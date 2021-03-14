@@ -50,31 +50,46 @@ def clean_relationships(r: ArrayLike, names: list[str]) -> ArrayLike:
     return r, new_names
 
 
-if __name__ == "__main__":
+def main():
     csv = "seating-chart.csv"
     df: pd.DataFrame = pd.read_csv(csv, sep=",", header=None)
     names = list(df.loc[1:, 0])
-    r = df.loc[1:, 1:].astype(float).to_numpy()
+    relationships = df.loc[1:, 1:].astype(float).to_numpy()
 
-    r, names = clean_relationships(r, names)
+    relationships, names = clean_relationships(relationships, names)
 
-    table_size = 8
-    n_tables = 10
+    best_score = 0
+    best_table = None
 
+    for i in range(100000):
+        tables = generate_tables(relationships, names, n_tables=10, table_size=8)
+        score = np.sum([np.sum([r.score for r in t]) for t in tables])
+        if score > best_score:
+            best_table = tables
+            best_score = score
+
+    print(best_score)
+    for t in best_table:
+        print(t)
+
+def generate_tables(relationships, names, n_tables, table_size):
     all_table_indices = np.arange(n_tables * table_size)
-    # np.random.shuffle(indices)
+    np.random.shuffle(all_table_indices)
     tables = []
     for i in range(n_tables):
-        start = i * table_size
-        end = (i + 1) * table_size
-        table_indices = all_table_indices[start:end]
-        tables.append(table_indices)
+        t = all_table_indices[(i * table_size):((i + 1) * table_size)]
 
-    for t in tables:
-        all_relationship_indices = list(itertools.combinations(t, 2))
-        scores = [r[ri[0], ri[1]] for ri in all_relationship_indices]
-        n = [(names[ri[0]], names[ri[1]]) for ri in all_relationship_indices]
+        pairs = list(itertools.combinations(t, 2))
+        score_pairs = [relationships[ri[0], ri[1]] for ri in pairs]
+        name_pairs = [(names[ri[0]], names[ri[1]]) for ri in pairs]
+
         table_relationships = [
             Relationship(name, idxs, s)
-            for name, idxs, s in zip(n, all_relationship_indices, scores)
+            for name, idxs, s in zip(name_pairs, pairs, score_pairs)
         ]
+        tables.append(table_relationships)
+    return tables
+
+
+if __name__ == "__main__":
+    main()
