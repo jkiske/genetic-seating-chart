@@ -3,13 +3,25 @@ from numpy.typing import ArrayLike
 import pandas as pd
 import itertools
 from dataclasses import dataclass
+from functools import cached_property
 
 
 @dataclass(frozen=True)
 class Relationship:
-    people: (str, str)
-    indices: (int, int)
-    score: int
+    pair: (str, str)
+    pair_is: (int, int)
+    score: float
+
+
+@dataclass(frozen=True)
+class Table:
+    relationships: list[Relationship]
+    people: list[str]
+    indices: list[int]
+
+    @cached_property
+    def score(self):
+        return np.sum([r.score for r in self.relationships])
 
 
 def clean_relationships(r: ArrayLike, names: list[str]) -> ArrayLike:
@@ -46,8 +58,12 @@ def clean_relationships(r: ArrayLike, names: list[str]) -> ArrayLike:
     # Make relationships bi-directional
     r += r.T
 
-    new_names = [item for sublist in couples for item in sublist]
+    new_names = flatten(couples)
     return r, new_names
+
+
+def flatten(l):
+    return list([item for sublist in l for item in sublist])
 
 
 def main():
@@ -58,36 +74,72 @@ def main():
 
     relationships, names = clean_relationships(relationships, names)
 
-    best_score = 0
-    best_table = None
+    n_tables = 10
+    table_size = 8
+    init_tables = generate_tables(relationships, names, n_tables, table_size)
 
-    for i in range(100000):
-        tables = generate_tables(relationships, names, n_tables=10, table_size=8)
-        score = np.sum([np.sum([r.score for r in t]) for t in tables])
-        if score > best_score:
-            best_table = tables
-            best_score = score
+    n_generations = 1000
+    n_children = 1000
+    n_half_lives = 5
+    for generation in range(n_generations):
+        samples = [init_tables]
+        for child in range(n_children):
+            step = generation * n_children + child
+            num_swaps = int(
+                np.round(
+                    (n_tables * table_size / 2)
+                    * np.e
+                    ** (-np.log(2) / (n_children * n_generations / n_half_lives) * step)
+                )
+            )
+            indices = permute_people(init_tables, num_swaps=num_swaps)
+            new_tables = generate_tables(
+                relationships, names, n_tables, table_size, all_table_indices=indices
+            )
+            samples.append(new_tables)
+        init_tables = sorted(samples, key=lambda x: sum(t.score for t in x))[-1]
+        score = sum(t.score for t in init_tables)
+        print(score)
 
-    print(best_score)
-    for t in best_table:
-        print(t)
+    for tables in init_tables:
+        print(tables.people)
 
-def generate_tables(relationships, names, n_tables, table_size):
-    all_table_indices = np.arange(n_tables * table_size)
-    np.random.shuffle(all_table_indices)
+
+def permute_people(tables: list[Table], num_swaps):
+    n_people = sum([len(t.people) for t in tables])
+    swaps = np.random.choice(np.arange(n_people), num_swaps * 2, replace=False)
+    swaps = np.array(list(zip(swaps[0::2], swaps[1::2])))
+    indices = np.array(flatten([t.indices for t in tables]))
+    indices[swaps[:, 0]], indices[swaps[:, 1]] = (
+        indices[swaps[:, 1]],
+        indices[swaps[:, 0]],
+    )
+    return indices
+
+
+def generate_tables(
+    relationships, names, n_tables, table_size, all_table_indices: ArrayLike = None
+) -> list[Table]:
+    if all_table_indices is None:
+        all_table_indices = np.arange(n_tables * table_size)
+        np.random.shuffle(all_table_indices)
+
     tables = []
     for i in range(n_tables):
-        t = all_table_indices[(i * table_size):((i + 1) * table_size)]
+        t = all_table_indices[(i * table_size) : ((i + 1) * table_size)]
 
-        pairs = list(itertools.combinations(t, 2))
-        score_pairs = [relationships[ri[0], ri[1]] for ri in pairs]
-        name_pairs = [(names[ri[0]], names[ri[1]]) for ri in pairs]
+        i_pairs = list(itertools.combinations(t, 2))
+        name_pairs = [(names[ri[0]], names[ri[1]]) for ri in i_pairs]
+        score_pairs = [relationships[ri[0], ri[1]] for ri in i_pairs]
 
         table_relationships = [
-            Relationship(name, idxs, s)
-            for name, idxs, s in zip(name_pairs, pairs, score_pairs)
+            Relationship(pair=pair, pair_is=pair_is, score=score)
+            for pair, pair_is, score in zip(name_pairs, i_pairs, score_pairs)
         ]
-        tables.append(table_relationships)
+        table = Table(
+            relationships=table_relationships, people=[names[ti] for ti in t], indices=t
+        )
+        tables.append(table)
     return tables
 
 
