@@ -1,4 +1,5 @@
-numpy
-scipy
-pandas
 black
+numpy
+pandas
+scipy
+tqdm

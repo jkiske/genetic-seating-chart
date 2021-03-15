@@ -4,6 +4,8 @@ import pandas as pd
 import itertools
 from dataclasses import dataclass
 from functools import cached_property
+from tqdm import tqdm
+from multiprocessing.pool import ThreadPool
 
 
 @dataclass(frozen=True)
@@ -67,7 +69,7 @@ def flatten(l):
 
 
 def main():
-    csv = "seating-chart.csv"
+    csv = "seating-chart-v2.csv"
     df: pd.DataFrame = pd.read_csv(csv, sep=",", header=None)
     names = list(df.loc[1:, 0])
     relationships = df.loc[1:, 1:].astype(float).to_numpy()
@@ -81,28 +83,30 @@ def main():
     n_generations = 1000
     n_children = 1000
     n_half_lives = 5
-    for generation in range(n_generations):
-        samples = [init_tables]
-        for child in range(n_children):
-            step = generation * n_children + child
-            num_swaps = int(
-                np.round(
-                    (n_tables * table_size / 2)
-                    * np.e
-                    ** (-np.log(2) / (n_children * n_generations / n_half_lives) * step)
-                )
-            )
-            indices = permute_people(init_tables, num_swaps=num_swaps)
-            new_tables = generate_tables(
-                relationships, names, n_tables, table_size, all_table_indices=indices
-            )
-            samples.append(new_tables)
-        init_tables = sorted(samples, key=lambda x: sum(t.score for t in x))[-1]
-        score = sum(t.score for t in init_tables)
-        print(score)
+    init_num_swaps = n_tables * table_size / 2 - 1
+    decay = np.log(2) * n_half_lives / n_generations
+
+    def gen_child(parent, n):
+        indices = permute_people(parent, num_swaps=n)
+        return generate_tables(
+            relationships, names, n_tables, table_size, all_table_indices=indices
+        )
+
+    with ThreadPool() as pool:
+        bar = tqdm(range(n_generations), leave=True)
+        for generation in bar:
+            num_swaps = int(np.round(init_num_swaps * np.e ** (-decay * generation)))
+            samples = pool.starmap(gen_child, [(init_tables, num_swaps)] * n_children)
+            samples.append(init_tables)
+            init_tables = sorted(samples, key=lambda x: sum(t.score for t in x))[-1]
+            score = sum(t.score for t in init_tables)
+            bar.set_description(f"Generation {generation} {score=}")
 
     for tables in init_tables:
-        print(tables.people)
+        print(",".join(tables.people))
+
+    for tables in init_tables:
+        print(tables)
 
 
 def permute_people(tables: list[Table], num_swaps):
