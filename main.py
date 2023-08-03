@@ -69,27 +69,32 @@ def flatten(l):
 
 
 def main():
-    csv = "seating-chart-v2.csv"
+    csv = "input.csv"
     df: pd.DataFrame = pd.read_csv(csv, sep=",", header=None)
     names = list(df.loc[1:, 0])
     relationships = df.loc[1:, 1:].astype(float).to_numpy()
 
     relationships, names = clean_relationships(relationships, names)
 
-    n_tables = 10
-    table_size = 8
-    init_tables = generate_tables(relationships, names, n_tables, table_size)
+#    n_tables = 8
+#    table_size = 8
+#    init_tables = generate_tables(relationships, names, n_tables, table_size)
+    table_sizes = [8, 8, , 6, 5, 5, 11, 11]
+    init_tables = generate_specified_tables(relationships, names, table_sizes)
 
     n_generations = 1000
     n_children = 1000
     n_half_lives = 5
-    init_num_swaps = n_tables * table_size / 2 - 1
+ #   init_num_swaps = n_tables * table_size / 2 - 1
+    init_num_swaps = sum(table_sizes) / 2 - 1
     decay = np.log(2) * n_half_lives / n_generations
 
     def gen_child(parent, n):
         indices = permute_people(parent, num_swaps=n)
-        return generate_tables(
-            relationships, names, n_tables, table_size, all_table_indices=indices
+#        return generate_tables(
+#            relationships, names, n_tables, table_size, all_table_indices=indices
+        return generate_specified_tables(
+            relationships, names, table_sizes, all_table_indices=indices
         )
 
     with ThreadPool() as pool:
@@ -107,7 +112,6 @@ def main():
 
     for tables in init_tables:
         print(tables)
-
 
 def permute_people(tables: list[Table], num_swaps):
     n_people = sum([len(t.people) for t in tables])
@@ -129,10 +133,11 @@ def generate_tables(
         np.random.shuffle(all_table_indices)
 
     tables = []
+
     for i in range(n_tables):
         t = all_table_indices[(i * table_size) : ((i + 1) * table_size)]
-
         i_pairs = list(itertools.combinations(t, 2))
+
         name_pairs = [(names[ri[0]], names[ri[1]]) for ri in i_pairs]
         score_pairs = [relationships[ri[0], ri[1]] for ri in i_pairs]
 
@@ -146,6 +151,39 @@ def generate_tables(
         tables.append(table)
     return tables
 
+def generate_specified_tables(
+    relationships, names, table_sizes, all_table_indices: ArrayLike = None
+) -> list[Table]:
+    if all_table_indices is None:
+        all_table_indices = np.arange(sum(table_sizes))
+        np.random.shuffle(all_table_indices)
+    # assign indice range for each table
+    index_range = []
+    for i in table_sizes:
+        if len(index_range) > 0:
+            start = index_range[-1][1]
+        else:
+            start = 0
+        index_range.append([start, start + i])
+
+    tables = []
+    for i in range(len(table_sizes)):
+        # select the range for which we have the table
+        t = all_table_indices[index_range[i][0] : index_range[i][1]]
+        i_pairs = list(itertools.combinations(t, 2))
+
+        name_pairs = [(names[ri[0]], names[ri[1]]) for ri in i_pairs]
+        score_pairs = [relationships[ri[0], ri[1]] for ri in i_pairs]
+
+        table_relationships = [
+            Relationship(pair=pair, pair_is=pair_is, score=score)
+            for pair, pair_is, score in zip(name_pairs, i_pairs, score_pairs)
+        ]
+        table = Table(
+            relationships=table_relationships, people=[names[ti] for ti in t], indices=t
+        )
+        tables.append(table)
+    return tables
 
 if __name__ == "__main__":
     main()
